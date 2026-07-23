@@ -1,0 +1,20 @@
+services:
+  coolify-mcp-oauth:
+    build: .
+    restart: unless-stopped
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL}
+      PORT: "3000"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      ALLOWED_GOOGLE_EMAILS: ${ALLOWED_GOOGLE_EMAILS:-}
+      DATA_DIR: /data
+    volumes:
+      - coolify-mcp-oauth-data:/data
+    ports:
+      - "3000"
+
+volumes:
+  coolify-mcp-oauth-data:
