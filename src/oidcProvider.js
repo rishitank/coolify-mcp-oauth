@@ -90,5 +90,37 @@ export function createOidcProvider({ publicUrl, mcpResourceUrl, db, jwks, cookie
   // X-Forwarded-* so issuer/redirect URLs come out as https, not http.
   provider.proxy = true;
 
+  // oidc-provider only surfaces action failures through its own `debug`
+  // namespaces (silent unless DEBUG=oidc-provider:* is set) or as a JSON
+  // body sent back to the *client* — nothing reaches our own stdout/logs
+  // by default. That makes remote-client failures (e.g. Claude/Cowork's
+  // connector setup failing to register) invisible to us: the caller sees
+  // an error, we see nothing. Log every action error server-side so a
+  // failure like that shows up in `docker logs` / Coolify's log viewer
+  // instead of only in the caller's UI.
+  for (const eventName of [
+    'server_error',
+    'registration_create.error',
+    'registration_read.error',
+    'registration_update.error',
+    'registration_delete.error',
+    'discovery.error',
+    'grant.error',
+    'authorization.error',
+    'userinfo.error',
+  ]) {
+    provider.on(eventName, (ctx, err) => {
+      console.error(`[oidc:${eventName}]`, JSON.stringify({
+        path: ctx.path,
+        method: ctx.method,
+        origin: ctx.get('origin') || null,
+        error: err.error,
+        error_description: err.error_description,
+        message: err.message,
+        statusCode: err.statusCode,
+      }));
+    });
+  }
+
   return provider;
 }

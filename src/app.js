@@ -51,6 +51,29 @@ export function createApp({ env, db, jwks, spawnOptions = {}, googleAuth } = {})
   app.set('trust proxy', true);
   app.disable('x-powered-by');
 
+  // Minimal access log — mounted before everything else so it captures
+  // literally every inbound request, including ones oidc-provider itself
+  // rejects before its own error events would fire (bad routing, method
+  // not allowed, etc). Skips /healthz to avoid drowning real traffic in
+  // uptime-check noise. This is what makes a remote caller's "it failed"
+  // report debuggable after the fact instead of needing to catch it live.
+  app.use((req, res, next) => {
+    if (req.path === '/healthz') return next();
+    const start = Date.now();
+    res.on('finish', () => {
+      console.log('[http]', JSON.stringify({
+        method: req.method,
+        path: req.originalUrl,
+        status: res.statusCode,
+        ms: Date.now() - start,
+        origin: req.get('origin') || null,
+        ua: req.get('user-agent') || null,
+        len: req.get('content-length') || null,
+      }));
+    });
+    next();
+  });
+
   app.get('/healthz', (req, res) => res.status(200).send('ok'));
 
   app.use(createInteractionsRouter({
