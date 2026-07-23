@@ -8,6 +8,7 @@ import express from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createCoolifySessionProxy, buildWwwAuthenticateHeader } from './mcpProxy.js';
 import { getCoolifyCredentials } from './users.js';
+import { MCP_SCOPE } from './mcpScope.js';
 
 export function createMcpRouter({
   verifyBearerToken,
@@ -26,7 +27,7 @@ export function createMcpRouter({
     res.json({
       resource: mcpResourceUrl,
       authorization_servers: [issuer],
-      scopes_supported: ['coolify'],
+      scopes_supported: [MCP_SCOPE],
       bearer_methods_supported: ['header'],
     });
   });

@@ -10,6 +10,7 @@
 import { Provider, errors } from 'oidc-provider';
 import { createAdapter } from './oidcAdapter.js';
 import { getUserById } from './users.js';
+import { MCP_SCOPE } from './mcpScope.js';
 
 const { InvalidTarget } = errors;
 
@@ -28,6 +29,12 @@ export function createOidcProvider({ publicUrl, mcpResourceUrl, db, jwks, cookie
       profile: ['name'],
       email: ['email'],
     },
+    // Extends the default ['openid', 'offline_access'] with our own
+    // resource's scope so it lands in scopes_supported and Dynamic Client
+    // Registration will actually accept a client requesting it — see
+    // mcpScope.js for why this has to be listed both here *and* in
+    // resourceIndicators.getResourceServerInfo below.
+    scopes: ['openid', 'offline_access', MCP_SCOPE],
     features: {
       // Anyone can self-register an MCP client (Claude/Cowork does this
       // automatically) — no pre-shared initial access token.
@@ -48,7 +55,7 @@ export function createOidcProvider({ publicUrl, mcpResourceUrl, db, jwks, cookie
             throw new InvalidTarget('unknown resource indicator');
           }
           return {
-            scope: 'coolify',
+            scope: MCP_SCOPE,
             accessTokenFormat: 'jwt',
             jwt: { sign: { alg: 'RS256' } },
           };

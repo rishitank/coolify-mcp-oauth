@@ -17,6 +17,7 @@ import { createInteractionsRouter } from './interactions.js';
 import { createMcpRouter } from './mcpRoute.js';
 import { createGoogleAuth } from './google.js';
 import { createBearerVerifier } from './mcpProxy.js';
+import { registrationCors } from './registrationCors.js';
 
 function toPublicJwk({ d, p, q, dp, dq, qi, ...publicOnly }) {
   return publicOnly;
@@ -94,6 +95,11 @@ export function createApp({ env, db, jwks, spawnOptions = {}, googleAuth } = {})
     issuer: env.publicUrl,
     spawnOptions,
   }));
+
+  // oidc-provider doesn't give the registration endpoint the CORS handling
+  // it gives every other route — see registrationCors.js for why this is
+  // needed at all.
+  app.use('/reg', registrationCors);
 
   app.use(provider.callback());
 
