@@ -1,0 +1,26 @@
+# osv-scanner and gitleaks block; npm audit annotates.
+# CodeQL runs separately in codeql.yml — it is free here because this repo is
+# public, and a token-issuing server is exactly where static analysis earns its
+# keep.
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "43 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    uses: rishitank/.github/.github/workflows/security.yml@v1
+    with:
+      ecosystem: node
