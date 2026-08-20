@@ -23,6 +23,15 @@ export function createOidcProvider({ publicUrl, mcpResourceUrl, db, jwks, cookie
     jwks,
     cookies: {
       keys: [cookieSecret],
+      // oidc-provider defaults cookies.short to path=/interaction/:uid, so the
+      // Google callback at /callback/google never carries the interaction
+      // cookie and every first-time sign-in dies with SessionNotFound. Ride
+      // the session cookie on all paths instead.
+      short: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+      },
     },
     claims: {
       openid: ['sub'],
