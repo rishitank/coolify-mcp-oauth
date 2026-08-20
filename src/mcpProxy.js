@@ -98,9 +98,12 @@ function pluralize(resource) {
 }
 
 async function nativeDeploy(baseUrl, accessToken, args) {
+  // Coolify's /api/v1/deploy takes `uuid` (resource uuid); `tag` only
+  // matches user-assigned custom tags, so uuid is the correct param for
+  // tag_or_uuid semantics.
   const tagOrUuid = args?.tag_or_uuid;
   if (!tagOrUuid) throw new Error('deploy: tag_or_uuid is required');
-  return callCoolify(baseUrl, accessToken, 'POST', `/api/v1/deploy?tag=${encodeURIComponent(tagOrUuid)}`);
+  return callCoolify(baseUrl, accessToken, 'POST', `/api/v1/deploy?uuid=${encodeURIComponent(tagOrUuid)}`);
 }
 
 async function nativeControl(baseUrl, accessToken, args) {
