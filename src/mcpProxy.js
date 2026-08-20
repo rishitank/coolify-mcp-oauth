@@ -58,6 +58,65 @@ export function createBearerVerifier({ issuer, audience, jwks }) {
 }
 
 /**
+ * Native overrides for upstream coolify-mcp tools whose HTTP verbs are
+ * stale against current Coolify API (deploy / restart / stop / start
+ * endpoints moved to POST). We already hold the session's Coolify base
+ * URL + API token, so implement them directly instead of waiting on an
+ * upstream release.
+ */
+async function callCoolify(baseUrl, accessToken, method, path) {
+  const url = `${String(baseUrl).replace(/\/+$/, '')}${path}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+      },
+    });
+  } catch (cause) {
+    throw new Error(`Coolify API ${method} ${path} unreachable: ${cause.message}`);
+  }
+  const text = await res.text();
+  let body = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = text;
+  }
+  if (!res.ok) {
+    throw new Error(`Coolify API ${method} ${path} -> ${res.status}: ${String(text).slice(0, 300)}`);
+  }
+  return body;
+}
+
+function pluralize(resource) {
+  if (resource === 'application') return 'applications';
+  if (resource === 'database') return 'databases';
+  return `${resource}s`;
+}
+
+async function nativeDeploy(baseUrl, accessToken, args) {
+  const tagOrUuid = args?.tag_or_uuid;
+  if (!tagOrUuid) throw new Error('deploy: tag_or_uuid is required');
+  return callCoolify(baseUrl, accessToken, 'POST', `/api/v1/deploy?tag=${encodeURIComponent(tagOrUuid)}`);
+}
+
+async function nativeControl(baseUrl, accessToken, args) {
+  const { resource, uuid, action } = args || {};
+  if (!resource || !uuid || !action) {
+    throw new Error('control: resource (application|service|database), uuid and action are required');
+  }
+  return callCoolify(baseUrl, accessToken, 'POST', `/api/v1/${pluralize(resource)}/${encodeURIComponent(uuid)}/${encodeURIComponent(action)}`);
+}
+
+const NATIVE_TOOLS = {
+  deploy: nativeDeploy,
+  control: nativeControl,
+};
+
+/**
  * Spawns one `coolify-mcp` child process for a single authenticated
  * session and wires up an MCP Server that forwards requests to it.
  *
@@ -91,7 +150,19 @@ export async function createCoolifySessionProxy({
 
   // Tools are the whole point and always forwarded.
   server.setRequestHandler(ListToolsRequestSchema, (request) => client.listTools(request.params));
-  server.setRequestHandler(CallToolRequestSchema, (request) => client.callTool(request.params));
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    const native = NATIVE_TOOLS[name];
+    if (native) {
+      try {
+        const result = await native(baseUrl, accessToken, args);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: 'text', text: `Error: ${err.message}` }] };
+      }
+    }
+    return client.callTool(request.params);
+  });
 
   // Forwarded too, but only if the underlying coolify-mcp version actually
   // supports them — otherwise we'd advertise a capability we can't serve.
