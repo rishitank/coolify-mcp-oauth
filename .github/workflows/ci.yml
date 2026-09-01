@@ -1,0 +1,31 @@
+# CI is defined once in rishitank/.github and called from here.
+# Change the pipeline there, not in this file.
+#
+# Only `test` is set: package.json defines no lint, typecheck or build script,
+# and passing an empty string skips those steps rather than inventing scripts
+# that do not exist.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: rishitank/.github/.github/workflows/node-ci.yml@v1
+    with:
+      node-version-file: .nvmrc
+      package-manager: npm
+      lint: ""
+      typecheck: ""
+      test: npm test
+      build: ""
