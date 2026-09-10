@@ -122,7 +122,7 @@ npm test        # runs the full suite once
 npm run test:watch
 ```
 
-The test suite (82 tests as of this writing) never touches the real
+The test suite (95 tests as of this writing) never touches the real
 Google or npm registry: `test/helpers/mockGoogle.js` stands in for
 Google's OIDC endpoints, and `test/helpers/fakeCoolifyMcp.js` stands in
 for the real `coolify-mcp` package, both speaking the real protocols so
@@ -149,6 +149,14 @@ in one test.
 - This is a single-instance deployment (SQLite, in-process session state)
   by design for now — see `docs/SCOPE.md` for what's explicitly out of
   scope.
+- A restart still loses every *live* MCP session (the spawned
+  `coolify-mcp` child process and the open HTTP transport are in-memory
+  objects, not data — they can't be persisted). What's no longer lost is
+  clarity about what happened: SQLite keeps a durable record of which
+  user each session id was issued to, so a request carrying a
+  since-restarted session id gets a clean `410 session_expired` (please
+  reinitialize) instead of either a confusing internal failure or a
+  silently fabricated new session issued under the old id.
 
 ## License
 

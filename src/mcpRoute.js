@@ -8,6 +8,7 @@ import express from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createCoolifySessionProxy, buildWwwAuthenticateHeader } from './mcpProxy.js';
 import { getCoolifyCredentials } from './users.js';
+import { recordMcpSession, getMcpSession, deleteMcpSession } from './mcpSessions.js';
 import { MCP_SCOPE } from './mcpScope.js';
 
 export function createMcpRouter({
@@ -20,7 +21,12 @@ export function createMcpRouter({
 }) {
   const router = express.Router();
   const protectedResourceMetadataUrl = `${new URL(mcpResourceUrl).origin}/.well-known/oauth-protected-resource`;
-  // sessionId -> { transport, proxy, userId }
+  // sessionId -> { transport, proxy, userId }. Live objects only — this
+  // Map does not survive a process restart, even though the OAuth/token
+  // layer (SQLite) and the mcp_sessions record of *who a session id
+  // belonged to* (mcpSessions.js) both do. See the unrecognized-session-id
+  // handling below for why the persisted record still matters even though
+  // it can't resurrect the session itself.
   const sessions = new Map();
 
   router.get('/.well-known/oauth-protected-resource', (req, res) => {
@@ -60,6 +66,46 @@ export function createMcpRouter({
         return res.status(403).json({ error: 'session_user_mismatch', error_description: 'This session belongs to a different account.' });
       }
 
+      // A session id was presented but isn't live in this process. Either
+      // it was never valid, or it was valid before this process restarted
+      // — the in-memory Map above does not survive that, unlike the
+      // mcp_sessions record. Distinguish the two and return a clean,
+      // actionable error instead of silently creating a fresh session
+      // under the old id, which would hand a never-initialized transport
+      // a request that may not even be `initialize` and fail in a more
+      // confusing way than either of these.
+      if (!session && sessionIdHeader) {
+        const persisted = getMcpSession(db, sessionIdHeader);
+        if (persisted) {
+          // CodeRabbit (PR #2) flagged this correctly: a session id is
+          // client-supplied, so before touching the persisted record at
+          // all we must confirm it actually belongs to the caller —
+          // otherwise any authenticated user could probe/delete another
+          // user's stale session-ownership row just by guessing or reusing
+          // a leaked id. This mirrors the live-session check above; it
+          // does not expose session contents or let anyone ride a live
+          // session (that's still gated by the in-memory Map), but the
+          // bookkeeping row itself is still someone's data.
+          if (persisted.userId !== auth.sub) {
+            return res.status(403).json({
+              error: 'session_user_mismatch',
+              error_description: 'This session belongs to a different account.',
+            });
+          }
+          // Was real, died with a prior process. Not coming back — drop
+          // the now-stale record and tell the client plainly.
+          deleteMcpSession(db, sessionIdHeader);
+          return res.status(410).json({
+            error: 'session_expired',
+            error_description: 'This MCP session no longer exists on the server (it may have restarted). Reinitialize to start a new session.',
+          });
+        }
+        return res.status(404).json({
+          error: 'session_not_found',
+          error_description: 'Unrecognized Mcp-Session-Id. Reinitialize to start a new session.',
+        });
+      }
+
       if (!session) {
         const credentials = getCoolifyCredentials(db, auth.sub, encryptionKey);
         if (!credentials) {
@@ -80,14 +126,19 @@ export function createMcpRouter({
           onsessioninitialized: (sessionId) => {
             session.sessionId = sessionId;
             sessions.set(sessionId, session);
+            recordMcpSession(db, sessionId, auth.sub);
           },
           onsessionclosed: (sessionId) => {
             sessions.delete(sessionId);
+            deleteMcpSession(db, sessionId);
             proxy.close().catch(() => {});
           },
         });
         transport.onclose = () => {
-          if (transport.sessionId) sessions.delete(transport.sessionId);
+          if (transport.sessionId) {
+            sessions.delete(transport.sessionId);
+            deleteMcpSession(db, transport.sessionId);
+          }
           proxy.close().catch(() => {});
         };
 

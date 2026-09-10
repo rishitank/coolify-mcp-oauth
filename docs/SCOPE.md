@@ -102,6 +102,14 @@ one process is simpler and there's nothing gained by splitting it.
   `grant_id`, `user_code`, `uid` columns for the adapter's `findByUid` /
   `findByUserCode` / `revokeByGrantId` lookups, and `expires_at` for
   cleanup.
+- `mcp_sessions` — `session_id` (PK), `user_id` (FK), `created_at`. Not a
+  substitute for `mcpRoute.js`'s in-memory `sessions` Map (which still
+  holds the actual live transport + spawned `coolify-mcp` child, and still
+  does not survive a restart) — this table only remembers which user a
+  given session id was issued to, so a restarted process can tell a
+  formerly-real, now-dead session id apart from one that was never valid,
+  and return `410 session_expired` instead of either an opaque failure or
+  quietly minting a new session under the old id.
 
 ## Security notes (this matters more than usual — it's public and holds
 other people's infra credentials)
