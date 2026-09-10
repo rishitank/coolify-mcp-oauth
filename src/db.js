@@ -29,6 +29,21 @@ CREATE TABLE IF NOT EXISTS coolify_credentials (
   updated_at INTEGER NOT NULL
 );
 
+-- Durable record of which user an MCP session id was issued to. The live
+-- session (StreamableHTTPServerTransport, spawned coolify-mcp child, the
+-- in-memory Map in mcpRoute.js) cannot be persisted or resurrected here —
+-- those are live objects, not data, and a restart always loses them. What
+-- this table lets a fresh process do is tell the difference between a
+-- session id that is unrecognized because it's bogus (never issued) versus
+-- unrecognized because the process that issued it has since restarted, so
+-- the two cases can return different, actionable errors instead of one
+-- ambiguous failure. See mcpRoute.js / mcpSessions.js.
+CREATE TABLE IF NOT EXISTS mcp_sessions (
+  session_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS oidc_model_instances (
   model TEXT NOT NULL,
   id TEXT NOT NULL,

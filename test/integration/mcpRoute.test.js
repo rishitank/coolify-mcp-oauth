@@ -150,4 +150,62 @@ describe('createMcpRouter (the /mcp HTTP route + session wiring)', () => {
 
     expect(res.status).toBe(403);
   });
+
+  it('returns 404 session_not_found for a session id that was never issued, instead of silently fabricating one', async () => {
+    const res = await request(httpServer)
+      .post('/mcp')
+      .set('Content-Type', 'application/json')
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Authorization', `Bearer token-for:${alice.id}`)
+      .set('Mcp-Session-Id', 'totally-made-up-session-id')
+      .send({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('session_not_found');
+  });
+
+  it('returns 410 session_expired — not a silently fabricated session — for a session id that was real but died with a restarted process', async () => {
+    // Establish a real session and capture its id.
+    const aliceClient = await connectAs(alice.id);
+    const sessionId = aliceClient.transport.sessionId;
+    expect(sessionId).toBeTruthy();
+    // The in-memory record of it must have been persisted alongside the
+    // live one, or this test would be exercising nothing.
+    const { getMcpSession } = await import('../../src/mcpSessions.js');
+    expect(getMcpSession(db, sessionId)).toBeTruthy();
+
+    // Simulate a process restart: a second router sharing the same on-disk
+    // (here, same in-memory-db-instance-standing-in-for-a-file) storage,
+    // but with its own brand-new, empty in-memory `sessions` Map — exactly
+    // what a fresh process has after a crash/redeploy. Do NOT use the old
+    // session against the original router/client; that would just keep
+    // using the still-live in-memory session and prove nothing.
+    const restartedApp = express();
+    restartedApp.use(createMcpRouter({
+      verifyBearerToken: stubVerifier(),
+      db,
+      encryptionKey: ENCRYPTION_KEY,
+      mcpResourceUrl: MCP_RESOURCE_URL,
+      issuer: ISSUER,
+      spawnOptions: { command: 'node', args: [FAKE_COOLIFY_MCP] },
+    }));
+    const restartedServer = restartedApp.listen(0);
+
+    try {
+      const res = await request(restartedServer)
+        .post('/mcp')
+        .set('Content-Type', 'application/json')
+        .set('Accept', 'application/json, text/event-stream')
+        .set('Authorization', `Bearer token-for:${alice.id}`)
+        .set('Mcp-Session-Id', sessionId)
+        .send({ jsonrpc: '2.0', id: 4, method: 'tools/list', params: {} });
+
+      expect(res.status).toBe(410);
+      expect(res.body.error).toBe('session_expired');
+      // The dead record shouldn't linger forever once we know it's dead.
+      expect(getMcpSession(db, sessionId)).toBeFalsy();
+    } finally {
+      await new Promise((resolve) => restartedServer.close(resolve));
+    }
+  });
 });
