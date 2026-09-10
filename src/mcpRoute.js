@@ -77,6 +77,21 @@ export function createMcpRouter({
       if (!session && sessionIdHeader) {
         const persisted = getMcpSession(db, sessionIdHeader);
         if (persisted) {
+          // CodeRabbit (PR #2) flagged this correctly: a session id is
+          // client-supplied, so before touching the persisted record at
+          // all we must confirm it actually belongs to the caller —
+          // otherwise any authenticated user could probe/delete another
+          // user's stale session-ownership row just by guessing or reusing
+          // a leaked id. This mirrors the live-session check above; it
+          // does not expose session contents or let anyone ride a live
+          // session (that's still gated by the in-memory Map), but the
+          // bookkeeping row itself is still someone's data.
+          if (persisted.userId !== auth.sub) {
+            return res.status(403).json({
+              error: 'session_user_mismatch',
+              error_description: 'This session belongs to a different account.',
+            });
+          }
           // Was real, died with a prior process. Not coming back — drop
           // the now-stale record and tell the client plainly.
           deleteMcpSession(db, sessionIdHeader);

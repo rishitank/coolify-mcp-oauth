@@ -122,7 +122,7 @@ npm test        # runs the full suite once
 npm run test:watch
 ```
 
-The test suite (94 tests as of this writing) never touches the real
+The test suite (95 tests as of this writing) never touches the real
 Google or npm registry: `test/helpers/mockGoogle.js` stands in for
 Google's OIDC endpoints, and `test/helpers/fakeCoolifyMcp.js` stands in
 for the real `coolify-mcp` package, both speaking the real protocols so

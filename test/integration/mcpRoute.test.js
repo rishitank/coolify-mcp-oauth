@@ -208,4 +208,50 @@ describe('createMcpRouter (the /mcp HTTP route + session wiring)', () => {
       await new Promise((resolve) => restartedServer.close(resolve));
     }
   });
+
+  it('rejects a different user probing a dead-but-persisted session id, and leaves the record untouched (CodeRabbit #2)', async () => {
+    // Give bob credentials so he can reach this codepath at all.
+    saveCoolifyCredentials(db, bob.id, { baseUrl: 'https://bob-coolify.example.com', accessToken: 'bob-token' }, ENCRYPTION_KEY);
+
+    // Establish a real session as alice and capture its id.
+    const aliceClient = await connectAs(alice.id);
+    const sessionId = aliceClient.transport.sessionId;
+    expect(sessionId).toBeTruthy();
+    const { getMcpSession } = await import('../../src/mcpSessions.js');
+    expect(getMcpSession(db, sessionId)).toBeTruthy();
+
+    // Simulate a restart (fresh in-memory Map, same persisted storage) —
+    // same technique as the 410 test above — then have BOB present
+    // ALICE's now-dead session id. Without an ownership check this would
+    // let any authenticated user delete another user's stale session
+    // record just by guessing or reusing a leaked id (CodeRabbit flagged
+    // this as CWE-862 / CWE-639 on the original commit of this PR).
+    const restartedApp = express();
+    restartedApp.use(createMcpRouter({
+      verifyBearerToken: stubVerifier(),
+      db,
+      encryptionKey: ENCRYPTION_KEY,
+      mcpResourceUrl: MCP_RESOURCE_URL,
+      issuer: ISSUER,
+      spawnOptions: { command: 'node', args: [FAKE_COOLIFY_MCP] },
+    }));
+    const restartedServer = restartedApp.listen(0);
+
+    try {
+      const res = await request(restartedServer)
+        .post('/mcp')
+        .set('Content-Type', 'application/json')
+        .set('Accept', 'application/json, text/event-stream')
+        .set('Authorization', `Bearer token-for:${bob.id}`)
+        .set('Mcp-Session-Id', sessionId)
+        .send({ jsonrpc: '2.0', id: 5, method: 'tools/list', params: {} });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('session_user_mismatch');
+      // Rejected, not deleted — alice's record must survive bob's probe.
+      expect(getMcpSession(db, sessionId)).toBeTruthy();
+    } finally {
+      await new Promise((resolve) => restartedServer.close(resolve));
+    }
+  });
 });
